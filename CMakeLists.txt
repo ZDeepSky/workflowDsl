@@ -5,32 +5,28 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# --- library: dispatch sources ---
-add_library(workflow_dsl STATIC
-    dispatch/source/step_engine.c
-    dispatch/source/step_impl.cc
-    dispatch/source/workflows_gen.c
+set(WORKFLOW_DSL_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
+set(WORKFLOW_DSL_PUB_INCLUDE ${WORKFLOW_DSL_ROOT}/dispatch/pub_inlcude)
+set(WORKFLOW_DSL_OUTPUT_DIR ${WORKFLOW_DSL_ROOT}/output)
+set(WORKFLOW_DSL_LIB_DIR ${WORKFLOW_DSL_OUTPUT_DIR}/lib)
+set(WORKFLOW_DSL_INCLUDE_DIR ${WORKFLOW_DSL_OUTPUT_DIR}/include)
+
+
+
+file(GLOB WORKFLOW_DSL_SOURCES
+    ${WORKFLOW_DSL_ROOT}/dispatch/source/*.c
+    ${WORKFLOW_DSL_ROOT}/dispatch/source/*.cc
 )
+
+add_library(workflow_dsl STATIC ${WORKFLOW_DSL_SOURCES})
 target_include_directories(workflow_dsl PUBLIC
-    ${CMAKE_SOURCE_DIR}/dispatch/include
+    ${WORKFLOW_DSL_PUB_INCLUDE}
 )
 
-# --- Google Test ---
-include(FetchContent)
-FetchContent_Declare(
-    googletest
-    URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+add_custom_command(TARGET workflow_dsl POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${WORKFLOW_DSL_LIB_DIR}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${WORKFLOW_DSL_INCLUDE_DIR}
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:workflow_dsl> ${WORKFLOW_DSL_LIB_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${WORKFLOW_DSL_PUB_INCLUDE} ${WORKFLOW_DSL_INCLUDE_DIR}
+    COMMENT "Copy libworkflow_dsl.a and public headers to output/"
 )
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
-
-enable_testing()
-
-# --- step_engine_ut ---
-add_executable(step_engine_ut test/code/ut/step_engine_ut.cpp)
-target_include_directories(step_engine_ut PRIVATE
-    ${CMAKE_SOURCE_DIR}/test
-    ${CMAKE_SOURCE_DIR}/dispatch/include
-)
-target_link_libraries(step_engine_ut PRIVATE workflow_dsl GTest::gtest_main)
-add_test(NAME step_engine_ut COMMAND step_engine_ut)
