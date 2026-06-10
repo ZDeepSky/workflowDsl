@@ -23,10 +23,18 @@ target_include_directories(workflow_dsl PUBLIC
     ${WORKFLOW_DSL_PUB_INCLUDE}
 )
 
-add_custom_command(TARGET workflow_dsl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${WORKFLOW_DSL_LIB_DIR}
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${WORKFLOW_DSL_INCLUDE_DIR}
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:workflow_dsl> ${WORKFLOW_DSL_LIB_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${WORKFLOW_DSL_PUB_INCLUDE} ${WORKFLOW_DSL_INCLUDE_DIR}
-    COMMENT "Copy libworkflow_dsl.a and public headers to output/"
+
+# 安装目标
+install(TARGETS workflow_dsl
+    EXPORT workflow_dsl_targets                  # 导出目标配置
+    ARCHIVE DESTINATION ${WORKFLOW_DSL_LIB_DIR}
+    LIBRARY DESTINATION ${WORKFLOW_DSL_LIB_DIR}
+    RUNTIME DESTINATION ${WORKFLOW_DSL_LIB_DIR}
+    INCLUDES DESTINATION ${WORKFLOW_DSL_INCLUDE_DIR}
+)
+
+# 安装头文件
+install(DIRECTORY ${WORKFLOW_DSL_PUB_INCLUDE}/
+    DESTINATION ${WORKFLOW_DSL_INCLUDE_DIR}/workflow_dsl
+    FILES_MATCHING PATTERN "*.h*"
 )
