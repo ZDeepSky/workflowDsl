@@ -2,3 +2,4 @@ test/build/
 output/
 docs/
 build/
+__pycache__/

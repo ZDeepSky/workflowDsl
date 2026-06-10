@@ -1,6 +1,6 @@
 # workflowDsl
 
-DSL 工作流状态机模块。开发计划见 [docs/plan.md](docs/plan.md)。
+DSL 工作流状态机模块。
 
 ## 构建库
 
