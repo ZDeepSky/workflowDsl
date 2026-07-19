@@ -15,9 +15,14 @@ if ! python3 -c "import antlr4" >/dev/null 2>&1; then
     python3 -m pip install antlr4-python3-runtime
 fi
 
+if ! python3 -c "import pytest" >/dev/null 2>&1; then
+    echo "Installing pytest..."
+    python3 -m pip install pytest
+fi
+
 export PYTHONPATH="${DISPATCH_DIR}:${PYTHONPATH:-}"
 
 cd "${SCRIPT_DIR}"
-python3 -m unittest discover -s "${SCRIPT_DIR}" -p "test_*.py" -v
+python3 -m pytest "${SCRIPT_DIR}" -v
 
 echo "Python tests passed."
