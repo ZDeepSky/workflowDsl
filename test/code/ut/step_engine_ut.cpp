@@ -1,178 +1,90 @@
 #include "TestFramework.h"
 #include "step_engine.h"
 
-struct TestWorkflowCtx {
-    StepContext step;
-    StateEntry *stateTable;
-    int callCount;
+namespace {
+
+const char *g_trace[64];
+int         g_traceN;
+
+WORD32 fn_A(Instance*, void*, WORD32) { g_trace[g_traceN++] = "A"; return STEP_OK; }
+WORD32 fn_B(Instance*, void*, WORD32) { g_trace[g_traceN++] = "B"; return STEP_OK; }
+WORD32 fn_C(Instance*, void*, WORD32) { g_trace[g_traceN++] = "C"; return STEP_OK; }
+WORD32 fn_fail(Instance*, void*, WORD32) { g_trace[g_traceN++] = "X"; return STEP_FAIL; }
+WORD32 fn_fail9(Instance*, void*, WORD32) { g_trace[g_traceN++] = "9"; return 9; }
+
+Step S_CALL(StepFunc f, WORD32 next, WORD32 fail) {
+    Step s = {0};
+    s.kind = STEP_CALL; s.func = f; s.next = next; s.fail = fail;
+    return s;
+}
+Step S_END() {
+    Step s = {0}; s.kind = STEP_END; return s;
+}
+
+void fresh(Instance *inst, const Step *table) {
+    inst->table = table; inst->idx = 0; inst->failCode = 0; inst->userCtx = 0;
+    for (int i = 0; i < MAX_LOOP_NEST; i++) inst->loopCount[i] = 0;
+}
+
+void clearTrace() {
+    g_traceN = 0;
+    for (int i = 0; i < 64; i++) g_trace[i] = nullptr;
+}
+
+}  // namespace
+
+class StepEngine : public ::testing::Test {
+protected:
+    void SetUp() override
+    {
+        clearTrace();
+    }
+
+    void TearDown() override
+    {
+        clearTrace();
+    }
 };
 
-static StepRet mock_ok(TestWorkflowCtx *t, void *m, WORD32 l, StepContext *ctx) {
-    (void)m;
-    (void)l;
-    (void)ctx;
-    t->callCount++;
-    return STEP_RET_OK;
-}
-
-TEST(StepEngine, linear_three_steps_then_sentinel_stops)
+TEST_F(StepEngine, linear_three_steps_then_end)
 {
-    TestWorkflowCtx workflow = {};
-    StateEntry table[] = {
-        { (StepFunc)mock_ok, "step1" },
-        { (StepFunc)mock_ok, "step2" },
-        { (StepFunc)mock_ok, "step3" },
-        { NULL, NULL },
-    };
-    workflow.stateTable = table;
-
-    stepRun(&workflow, NULL, 0);
-
-    EXPECT_EQ(workflow.callCount, 3);
-    EXPECT_EQ(workflow.step.idx, 3u);
+    Step table[] = { S_CALL(fn_A, 1, 0), S_CALL(fn_B, 2, 0), S_CALL(fn_C, 3, 0), S_END() };
+    Instance inst; fresh(&inst, table);
+    StepRet r = stepRun(&inst, 0, 0, 0);
+    EXPECT_EQ(r, STEP_RET_END);
+    EXPECT_EQ(inst.idx, 3u);
+    EXPECT_STREQ(g_trace[0], "A");
+    EXPECT_STREQ(g_trace[1], "B");
+    EXPECT_STREQ(g_trace[2], "C");
 }
 
-static int waitCount = 0;
-
-static StepRet mock_wait_then_ok(TestWorkflowCtx *t, void *m, WORD32 l, StepContext *ctx) {
-    (void)m;
-    (void)l;
-    (void)ctx;
-    t->callCount++;
-    if (waitCount++ == 0) return STEP_RET_WAIT;
-    return STEP_RET_OK;
-}
-
-TEST(StepEngine, wait_suspends_and_resume_continues)
+TEST_F(StepEngine, fail_without_fail_target_stops)
 {
-    waitCount = 0;
-    TestWorkflowCtx workflow = {};
-    StateEntry table[] = {
-        { (StepFunc)mock_ok,          "before_wait" },
-        { (StepFunc)mock_wait_then_ok, "wait_step"  },
-        { (StepFunc)mock_ok,          "after_wait"  },
-        { NULL, NULL },
-    };
-    workflow.stateTable = table;
-
-    stepRun(&workflow, NULL, 0);
-    EXPECT_EQ(workflow.callCount, 2);
-    EXPECT_EQ(workflow.step.idx, 1u);
-
-    stepResume(&workflow, NULL, 0);
-    EXPECT_EQ(workflow.callCount, 4);  // wait_step 再次调用 + after_wait
-    EXPECT_EQ(workflow.step.idx, 3u);
+    Step table[] = { S_CALL(fn_A, 1, 0), S_CALL(fn_fail, 2, 0), S_CALL(fn_B, 3, 0), S_END() };
+    Instance inst; fresh(&inst, table);
+    StepRet r = stepRun(&inst, 0, 0, 0);
+    EXPECT_EQ(r, STEP_RET_FAIL);
+    EXPECT_EQ(inst.failCode, 1u);
+    EXPECT_EQ(g_traceN, 2);            // A, X —— B 未执行
 }
 
-static StepRet mock_error(TestWorkflowCtx *t, void *m, WORD32 l, StepContext *ctx) {
-    (void)m;
-    (void)l;
-    (void)ctx;
-    t->callCount++;
-    return STEP_RET_ERROR;
-}
-
-TEST(StepEngine, error_stops_engine_and_does_not_continue)
+TEST_F(StepEngine, fail_jumps_to_fail_block_and_keeps_failcode)
 {
-    TestWorkflowCtx workflow = {};
-    StateEntry table[] = {
-        { (StepFunc)mock_ok,    "step1" },
-        { (StepFunc)mock_error, "bad_step" },
-        { (StepFunc)mock_ok,    "never_reached" },
-        { NULL, NULL },
+    // 排布 [0..1 正常][2 fail 块][3 finally][4 END]
+    Step table[] = {
+        S_CALL(fn_A,    1, 2),   // 0 正常，失败→2
+        S_CALL(fn_fail9, 3, 2),  // 1 失败码=9，失败→2
+        S_CALL(fn_B,    3, 0),   // 2 fail 块 → finally(3)
+        S_CALL(fn_C,    4, 0),   // 3 finally → END
+        S_END(),                 // 4
     };
-    workflow.stateTable = table;
-
-    stepRun(&workflow, NULL, 0);
-
-    EXPECT_EQ(workflow.callCount, 2);
-}
-
-static StepRet mock_end(TestWorkflowCtx *t, void *m, WORD32 l, StepContext *ctx) {
-    (void)m;
-    (void)l;
-    (void)ctx;
-    t->callCount++;
-    return STEP_RET_END;
-}
-
-TEST(StepEngine, end_stops_engine_normally)
-{
-    TestWorkflowCtx workflow = {};
-    StateEntry table[] = {
-        { (StepFunc)mock_ok,  "step1" },
-        { (StepFunc)mock_end, "final_step" },
-        { (StepFunc)mock_ok,  "never_reached" },
-        { NULL, NULL },
-    };
-    workflow.stateTable = table;
-
-    stepRun(&workflow, NULL, 0);
-
-    EXPECT_EQ(workflow.callCount, 2);
-}
-
-static StepRet mock_goto_step3(TestWorkflowCtx *t, void *m, WORD32 l, StepContext *ctx) {
-    (void)m;
-    (void)l;
-    t->callCount++;
-    ctx->nextIdx = 2;
-    return STEP_RET_OK;
-}
-
-TEST(StepEngine, nextidx_override_jumps_to_target)
-{
-    TestWorkflowCtx workflow = {};
-    StateEntry table[] = {
-        { (StepFunc)mock_ok,         "step1" },
-        { (StepFunc)mock_goto_step3, "goto_step" },
-        { (StepFunc)mock_ok,         "step3" },
-        { (StepFunc)mock_ok,         "step4" },
-        { NULL, NULL },
-    };
-    workflow.stateTable = table;
-
-    stepRun(&workflow, NULL, 0);
-
-    EXPECT_EQ(workflow.callCount, 4);
-}
-
-TEST(StepEngine, empty_table_immediately_stops)
-{
-    TestWorkflowCtx workflow = {};
-    StateEntry table[] = {
-        { NULL, NULL },
-    };
-    workflow.stateTable = table;
-
-    stepRun(&workflow, NULL, 0);
-
-    EXPECT_EQ(workflow.callCount, 0);
-}
-
-static StepRet mock_wait_then_error(TestWorkflowCtx *t, void *m, WORD32 l, StepContext *ctx) {
-    (void)m;
-    (void)l;
-    (void)ctx;
-    t->callCount++;
-    if (t->callCount == 1) return STEP_RET_WAIT;
-    return STEP_RET_ERROR;
-}
-
-TEST(StepEngine, wait_then_error_on_resume_stops)
-{
-    TestWorkflowCtx workflow = {};
-    StateEntry table[] = {
-        { (StepFunc)mock_wait_then_error, "flaky_step" },
-        { (StepFunc)mock_ok,              "never_reached" },
-        { NULL, NULL },
-    };
-    workflow.stateTable = table;
-
-    stepRun(&workflow, NULL, 0);
-    EXPECT_EQ(workflow.callCount, 1);
-    EXPECT_EQ(workflow.step.idx, 0u);
-
-    stepResume(&workflow, NULL, 0);
-    EXPECT_EQ(workflow.callCount, 2);
+    Instance inst; fresh(&inst, table);
+    StepRet r = stepRun(&inst, 0, 0, 0);
+    EXPECT_EQ(r, STEP_RET_END);
+    EXPECT_EQ(inst.failCode, 9u);      // 失败码保留
+    EXPECT_STREQ(g_trace[0], "A");
+    EXPECT_STREQ(g_trace[1], "9");
+    EXPECT_STREQ(g_trace[2], "B");     // fail 块
+    EXPECT_STREQ(g_trace[3], "C");     // finally
+    EXPECT_EQ(g_traceN, 4);
 }

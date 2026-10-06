@@ -1,42 +1,36 @@
 #include "step_engine.h"
-
-#include <stddef.h>
-
-typedef struct {
-    StepContext step;
-    StateEntry *stateTable;
-    int callCount;
-} TestWorkflowCtx;
-
-void stepRun(void *workflow, void *msg, WORD32 len)
+static StepHost g_host = {0, 0};
+void stepSetHost(const StepHost *host)
 {
-    StepContext *ctx = (StepContext *)((char *)workflow + offsetof(TestWorkflowCtx, step));
-    StateEntry *table = *(StateEntry **)((char *)workflow + offsetof(TestWorkflowCtx, stateTable));
-
-    while (1) {
-        StateEntry *entry = &table[ctx->idx];
-        if (!entry->func) {
-            return;
+    if (host) g_host = *host;
+    else { g_host.timerStart = 0; g_host.timerStop = 0; }
+}
+StepRet stepRun(Instance *inst, WORD32 msgId, void *msg, WORD32 len)
+{
+    (void)msgId;
+    for (;;) {
+        const Step *s = &inst->table[inst->idx];
+        switch (s->kind) {
+        case STEP_END:
+            return STEP_RET_END;
+        case STEP_CALL: {
+            WORD32 r = s->func(inst, msg, len);
+            if (r == STEP_OK) {
+                inst->idx = s->next;
+                continue;
+            }
+            inst->failCode = r;
+            if (s->fail) { inst->idx = s->fail; continue; }
+            return STEP_RET_FAIL;
         }
-
-        ctx->nextIdx = ctx->idx + 1;
-        StepRet ret = entry->func(workflow, msg, len, ctx);
-
-        switch (ret) {
-        case STEP_RET_OK:
-            ctx->idx = ctx->nextIdx;
-            continue;
-        case STEP_RET_WAIT:
-            return;
-        case STEP_RET_END:
-            return;
-        case STEP_RET_ERROR:
-            return;
+        /* 后续任务在此补 STEP_JUMPIF / STEP_RECV / STEP_DELAY / STEP_ASYNC */
+        default:
+            return STEP_RET_FAIL;
         }
     }
 }
-
-void stepResume(void *workflow, void *msg, WORD32 len)
+StepRet stepResume(Instance *inst, WORD32 msgId, void *msg, WORD32 len)
 {
-    stepRun(workflow, msg, len);
+    (void)inst; (void)msgId; (void)msg; (void)len;
+    return STEP_RET_FAIL;  /* Task 4 实现 */
 }

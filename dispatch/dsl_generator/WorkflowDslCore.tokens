@@ -1,0 +1,15 @@
+T__0=1
+T__1=2
+T__2=3
+T__3=4
+Ignore=5
+ID=6
+NEWLINE=7
+SPACE=8
+COMMENT=9
+LINE_COMMENT=10
+'workflow'=1
+'procedure'=2
+'{'=3
+'}'=4
+'ignore'=5

@@ -10,23 +10,27 @@
 extern "C" {
 #endif
 
-RetCode workflow_SimpleFlow(WorkflowContext *t, void *m, WORD32 l);
+{% for workflow in workflows -%}
+RetCode workflow_{{ workflow.name }}(WorkflowContext *t, void *m, WORD32 l);
+{% endfor %}
 
-void SimpleFlow_resume(WorkflowContext *t, void *m, WORD32 l);
+{% for workflow in workflows -%}
+void {{ workflow.name }}_resume(WorkflowContext *t, void *m, WORD32 l);
+{% endfor %}
 
 /* State index macros (also emitted in .c for local wrappers) */
-#define IDX_SimpleFlow_init  0
-#define IDX_SimpleFlow_select_handler  1
-#define IDX_SimpleFlow_process_data  2
-#define IDX_SimpleFlow_respond  3
-#define IDX_SimpleFlow_while_isComplete  4
-#define IDX_SimpleFlow_cleanup  5
+{% for workflow in workflows -%}
+{% for st in workflow.flat_states -%}
+#define IDX_{{ workflow.name }}_{{ st.name }}  {{ loop.index0 }}
+{% endfor %}
+{% endfor %}
 
 /* Action ids used as designated initializers for mapping tables */
 enum {
-ACTION_SIMPLE_A = 0,
-ACTION_SIMPLE_B = 1,
-ACTION_ID_COUNT
+{% for b in bindings -%}
+    {{ b.action }} = {{ loop.index0 }},
+{% endfor -%}
+    ACTION_ID_COUNT
 };
 
 typedef RetCode (*WorkflowFunc)(WorkflowContext *t, void *m, WORD32 l);
