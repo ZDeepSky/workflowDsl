@@ -23,7 +23,16 @@ StepRet stepRun(Instance *inst, WORD32 msgId, void *msg, WORD32 len)
             if (s->fail) { inst->idx = s->fail; continue; }
             return STEP_RET_FAIL;
         }
-        /* 后续任务在此补 STEP_JUMPIF / STEP_RECV / STEP_DELAY / STEP_ASYNC */
+        case STEP_JUMPIF: {
+            WORD32 r = s->func(inst, msg, len);
+            if (r != 0) {                  /* 条件真 → 进分支体/循环体 */
+                inst->idx = s->next;
+            } else {                       /* 条件假 → 跳出 */
+                inst->idx = s->jump;
+            }
+            continue;
+        }
+        /* 后续任务在此补 STEP_RECV / STEP_DELAY / STEP_ASYNC */
         default:
             return STEP_RET_FAIL;
         }

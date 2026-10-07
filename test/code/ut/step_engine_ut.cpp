@@ -9,8 +9,11 @@ int         g_traceN;
 WORD32 fn_A(Instance*, void*, WORD32) { g_trace[g_traceN++] = "A"; return STEP_OK; }
 WORD32 fn_B(Instance*, void*, WORD32) { g_trace[g_traceN++] = "B"; return STEP_OK; }
 WORD32 fn_C(Instance*, void*, WORD32) { g_trace[g_traceN++] = "C"; return STEP_OK; }
+WORD32 fn_D(Instance*, void*, WORD32) { g_trace[g_traceN++] = "D"; return STEP_OK; }
 WORD32 fn_fail(Instance*, void*, WORD32) { g_trace[g_traceN++] = "X"; return STEP_FAIL; }
 WORD32 fn_fail9(Instance*, void*, WORD32) { g_trace[g_traceN++] = "9"; return 9; }
+WORD32 cond_true(Instance*, void*, WORD32) { return 1; }
+WORD32 cond_false(Instance*, void*, WORD32) { return 0; }
 
 Step S_CALL(StepFunc f, WORD32 next, WORD32 fail) {
     Step s = {0};
@@ -19,6 +22,11 @@ Step S_CALL(StepFunc f, WORD32 next, WORD32 fail) {
 }
 Step S_END() {
     Step s = {0}; s.kind = STEP_END; return s;
+}
+Step S_JUMPIF(StepFunc f, WORD32 next, WORD32 jump) {
+    Step s = {0};
+    s.kind = STEP_JUMPIF; s.func = f; s.next = next; s.jump = jump;
+    return s;
 }
 
 void fresh(Instance *inst, const Step *table) {
@@ -87,4 +95,56 @@ TEST_F(StepEngine, fail_jumps_to_fail_block_and_keeps_failcode)
     EXPECT_STREQ(g_trace[2], "B");     // fail 块
     EXPECT_STREQ(g_trace[3], "C");     // finally
     EXPECT_EQ(g_traceN, 4);
+}
+
+TEST_F(StepEngine, if_true_takes_next_branch)
+{
+    // if cond_true { A } else { B }  → 之后 C
+    Step table[] = {
+        S_JUMPIF(cond_true, 1, 2),   // 0 真→1(A)，假→2(B)
+        S_CALL(fn_A, 3, 0),          // 1 A
+        S_CALL(fn_B, 3, 0),          // 2 B
+        S_CALL(fn_C, 4, 0),          // 3 C
+        S_END(),                     // 4
+    };
+    Instance inst; fresh(&inst, table);
+    stepRun(&inst, 0, 0, 0);
+    EXPECT_EQ(g_traceN, 2);
+    EXPECT_STREQ(g_trace[0], "A");
+    EXPECT_STREQ(g_trace[1], "C");
+}
+
+TEST_F(StepEngine, if_false_takes_jump_branch)
+{
+    Step table[] = {
+        S_JUMPIF(cond_false, 1, 2),  // 0 假→2(B)
+        S_CALL(fn_A, 3, 0),          // 1 A（跳过）
+        S_CALL(fn_B, 3, 0),          // 2 B
+        S_CALL(fn_C, 4, 0),          // 3 C
+        S_END(),                     // 4
+    };
+    Instance inst; fresh(&inst, table);
+    stepRun(&inst, 0, 0, 0);
+    EXPECT_EQ(g_traceN, 2);
+    EXPECT_STREQ(g_trace[0], "B");
+    EXPECT_STREQ(g_trace[1], "C");
+}
+
+TEST_F(StepEngine, else_if_chain_picks_first_true)
+{
+    // if cond_false { A } else if cond_true { B } else { C }  → 之后 D
+    Step table[] = {
+        S_JUMPIF(cond_false, 1, 2),  // 0 假→2
+        S_CALL(fn_A, 5, 0),          // 1 A
+        S_JUMPIF(cond_true, 3, 4),   // 2 真→3(B)
+        S_CALL(fn_B, 5, 0),          // 3 B
+        S_CALL(fn_C, 5, 0),          // 4 C
+        S_CALL(fn_D, 6, 0),          // 5 D
+        S_END(),                     // 6
+    };
+    Instance inst; fresh(&inst, table);
+    stepRun(&inst, 0, 0, 0);
+    EXPECT_EQ(g_traceN, 2);
+    EXPECT_STREQ(g_trace[0], "B");
+    EXPECT_STREQ(g_trace[1], "D");
 }
